@@ -57,3 +57,16 @@ if ingredients_list and name_on_order:
         
         session.sql(insert_stmt).collect()
         st.success("✅ Your Smoothie is ordered!", icon="🥤")
+import requests
+
+smoothiefroot_response = requests.get("https://my.smoothiefroot.com/api/fruit/watermelon")
+
+# Optional: show raw response
+st.text(smoothiefroot_response)
+
+# Optional: show parsed JSON
+if smoothiefroot_response.status_code == 200:
+    fruit_data = smoothiefroot_response.json()
+    st.write(fruit_data)
+else:
+    st.error(f"Error {smoothiefroot_response.status_code}: Could not fetch data")
