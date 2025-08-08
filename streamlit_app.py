@@ -28,6 +28,23 @@ my_dataframe = session.table("smoothies.public.fruit_options").select(col('FRUIT
 # Instruction for selecting fruits
 st.write("Choose up to 5 fruits for your custom smoothie:")
 
+# Convert fruits to list for multiselect
+fruit_list = my_dataframe.to_pandas()["FRUIT_NAME"].tolist()
+ingredients_list = st.multiselect(
+    "Pick your favorite fruits:",
+    fruit_list,
+    max_selections=5
+)
+
+# Enforce max 5 selection manually
+if len(ingredients_list) > 5:
+    st.error("🚫 You can only select up to 5 fruits!")
+elif ingredients_list:
+    st.success(f"You selected: {', '.join(ingredients_list)}")
+else:
+    st.info("No fruits selected yet. Pick from the list!")
+
+
 if ingredients_list:
     ingredients_string = ''
 
