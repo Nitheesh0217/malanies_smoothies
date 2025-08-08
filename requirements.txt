@@ -1,2 +1,10 @@
-snowflake-snowpark-python=
-streamlit
+channels:
+  - snowflake
+dependencies:
+  - python=3.11.*
+  - snowflake-snowpark-python
+  - streamlit
+  - pip
+  - pip:
+      - pandas
+      - matplotlib
