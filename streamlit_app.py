@@ -2,6 +2,7 @@
 import streamlit as st
 import requests
 from snowflake.snowpark.functions import col, when_matched
+import pandas as pd
 
 # Helpful documentation links
 helpful_links = [
