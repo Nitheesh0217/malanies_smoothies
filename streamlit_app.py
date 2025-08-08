@@ -1,5 +1,6 @@
 # Import python packages
 import streamlit as st
+import requests
 from snowflake.snowpark.functions import col, when_matched
 
 # Helpful documentation links
@@ -27,21 +28,19 @@ my_dataframe = session.table("smoothies.public.fruit_options").select(col('FRUIT
 # Instruction for selecting fruits
 st.write("Choose up to 5 fruits for your custom smoothie:")
 
-# Convert fruits to list for multiselect
-fruit_list = my_dataframe.to_pandas()["FRUIT_NAME"].tolist()
-ingredients_list = st.multiselect(
-    "Pick your favorite fruits:",
-    fruit_list,
-    max_selections=5
-)
+if ingredients_list:
+    ingredients_string = ''
 
-# Enforce max 5 selection manually
-if len(ingredients_list) > 5:
-    st.error("🚫 You can only select up to 5 fruits!")
-elif ingredients_list:
-    st.success(f"You selected: {', '.join(ingredients_list)}")
-else:
-    st.info("No fruits selected yet. Pick from the list!")
+    for fruit_chosen in ingredients_list:
+        ingredients_string += fruit_chosen + ' '
+        smoothiefroot_response = requests.get(
+            f"https://my.smoothiefroot.com/api/fruit/{fruit_chosen.lower()}"
+        )
+        sf_df = st.dataframe(
+            data=smoothiefroot_response.json(),
+            use_container_width=True
+        )
+
 
 # ✅ Submit order when ready
 if ingredients_list and name_on_order:
@@ -57,8 +56,7 @@ if ingredients_list and name_on_order:
         
         session.sql(insert_stmt).collect()
         st.success("✅ Your Smoothie is ordered!", icon="🥤")
-# New section to display SmoothieFroot nutrition information
-import requests
+
 
 # Call the SmoothieFroot API for watermelon data
 smoothiefroot_response = requests.get("https://my.smoothiefroot.com/api/fruit/watermelon")
