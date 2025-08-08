@@ -22,7 +22,6 @@ if name_on_order:
     st.write(f"Name entered: {name_on_order}")
 
 # Establish Snowflake session and fetch fruit options
-session = get_active_session()
 my_dataframe = session.table("smoothies.public.fruit_options").select(col('FRUIT_NAME'))
 
 # Instruction for selecting fruits
