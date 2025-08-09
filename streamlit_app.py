@@ -1,47 +1,49 @@
+# Import python packages
 import streamlit as st
 import requests
+from snowflake.snowpark.functions import col, when_matched
 import pandas as pd
-from snowflake.snowpark.functions import col
 
-st.set_page_config(page_title="Smoothies", page_icon="🥤", layout="centered")
+# Helpful documentation links
+helpful_links = [
+    "https://docs.streamlit.io",
+    "https://docs.snowflake.com/en/developer-guide/streamlit/about-streamlit",
+    "https://github.com/Snowflake-Labs/snowflake-demo-streamlit",
+    "https://docs.snowflake.com/en/release-notes/streamlit-in-snowflake"
+]
 
+# App title and instructions
 st.title(":cup_with_straw: Customize your Smoothie! :cup_with_straw:")
 st.write("Choose the fruits you want in your custom Smoothie!")
 
-# Snowflake connection
-cnx = st.connection("snowflake")
+cnx = st.connection("snowflake")  # Uses Snowflake connection from Streamlit secrets
 session = cnx.session()
-
-# Always point to the same DB/Schema the grader reads
-session.sql("USE DATABASE SMOOTHIES").collect()
-session.sql("USE SCHEMA PUBLIC").collect()
-
-# Ensure schema includes ORDER_FILLED
-session.sql(
-    """
-    ALTER TABLE IF EXISTS SMOOTHIES.PUBLIC.ORDERS
-    ADD COLUMN IF NOT EXISTS ORDER_FILLED BOOLEAN DEFAULT FALSE
-    """
-).collect()
-
 # Input for customer name
-name_on_order = st.text_input("Name on Smoothie:").strip()
+name_on_order = st.text_input('Name on Smoothie:')
 if name_on_order:
     st.write(f"Name entered: {name_on_order}")
 
-# Fruit options
-options_df = (
-    session.table("SMOOTHIES.PUBLIC.FRUIT_OPTIONS")
-    .select(col("FRUIT_NAME"), col("SEARCH_ON"))
-    .to_pandas()
-)
-st.dataframe(options_df, use_container_width=True)
+# Establish Snowflake session and fetch fruit options
+my_dataframe = session.table("smoothies.public.fruit_options").select(col('FRUIT_NAME'),col('SEARCH_ON'))
+#st.dataframe(data=my_dataframe, use_container_width=True)
+#st.stop()
+pd_df = my_dataframe.to_pandas()
 
+# Preview the pandas df
+st.dataframe(pd_df, use_container_width=True)
+st.stop()
+# Instruction for selecting fruits
 st.write("Choose up to 5 fruits for your custom smoothie:")
-fruit_list = options_df["FRUIT_NAME"].tolist()
-ingredients_list = st.multiselect("Pick your favorite fruits:", fruit_list, max_selections=5)
 
-# UX hints
+# Convert fruits to list for multiselect
+fruit_list = my_dataframe.to_pandas()["FRUIT_NAME"].tolist()
+ingredients_list = st.multiselect(
+    "Pick your favorite fruits:",
+    fruit_list,
+    max_selections=5
+)
+
+# Enforce max 5 selection manually
 if len(ingredients_list) > 5:
     st.error("🚫 You can only select up to 5 fruits!")
 elif ingredients_list:
@@ -49,45 +51,40 @@ elif ingredients_list:
 else:
     st.info("No fruits selected yet. Pick from the list!")
 
-# Nutrition (optional)
+
 if ingredients_list:
-    for fruit in ingredients_list:
-        search_on = options_df.loc[options_df["FRUIT_NAME"] == fruit, "SEARCH_ON"].iloc[0]
-        st.subheader(f"{fruit} Nutrition Information")
-        try:
-            res = requests.get("https://fruityvice.com/api/fruit/" + str(search_on), timeout=10)
-            st.dataframe(res.json(), use_container_width=True)
-        except Exception as e:
-            st.caption(f"(Skipping nutrition lookup: {e})")
+    ingredients_string = ''
 
-# --- Helpers ---
-def normalize_items(items):
-    out = []
-    for x in items:
-        s = str(x).replace(" ", " ").replace(" ", " ")
-        s = " ".join(s.split())  # collapse whitespace
-        out.append(s)
-    return out
+    for fruit_chosen in ingredients_list:
+        ingredients_string += fruit_chosen + ' '
+        st.subheader(fruit_chosen+'Nutrition Information')
+        smoothiefroot_response = requests.get(
+            f"https://my.smoothiefroot.com/api/fruit/{fruit_chosen.lower()}"
+        )
+        sf_df = st.dataframe(
+            data=smoothiefroot_response.json(),
+            use_container_width=True
+        )
 
-# ---------- Place Order (INSERT/UPSERT) ----------
+
+# ✅ Submit order when ready
 if ingredients_list and name_on_order:
-    if st.button("Submit Order"):
-        clean = normalize_items(ingredients_list)
-        # Comma+space list — required for grader hashing
-        ingredients_str = ", ".join(clean)
-
-        # Parameter binding (avoid f-strings)
-        session.sql(
-            """
-            MERGE INTO SMOOTHIES.PUBLIC.ORDERS t
-            USING (SELECT ? AS n, ? AS s, FALSE AS f) src
-              ON t.NAME_ON_ORDER = src.n
-            WHEN MATCHED THEN UPDATE SET
-              t.INGREDIENTS = src.s,
-              t.ORDER_FILLED = src.f
-            WHEN NOT MATCHED THEN INSERT (NAME_ON_ORDER, INGREDIENTS, ORDER_FILLED)
-              VALUES (src.n, src.s, src.f)
-            """
-        ).bind((name_on_order, ingredients_str)).collect()
-
+    if st.button('Submit Order'):
+        ingredients_str = ', '.join(ingredients_list).strip()
+        
+        # ✅ Correct insert (exclude auto-generated fields)
+        insert_stmt = f"""
+            INSERT INTO SMOOTHIES.PUBLIC.ORDERS 
+            (NAME_ON_ORDER, INGREDIENTS)
+            VALUES ('{name_on_order}', '{ingredients_str}')
+        """
+        
+        session.sql(insert_stmt).collect()
         st.success("✅ Your Smoothie is ordered!", icon="🥤")
+
+
+# Call the SmoothieFroot API for watermelon data
+smoothiefroot_response = requests.get("https://my.smoothiefroot.com/api/fruit/watermelon")
+
+# Display the JSON response as a DataFrame in Streamlit
+sf_df = st.dataframe(data=smoothiefroot_response.json(), use_container_width=True)
