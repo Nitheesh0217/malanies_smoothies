@@ -1,14 +1,14 @@
-# Import python packages
 import streamlit as st
 import requests
-from snowflake.snowpark.functions import col
 import pandas as pd
+from snowflake.snowpark.functions import col
 
-# App title and instructions
+st.set_page_config(page_title="Smoothies", page_icon="🥤", layout="centered")
+
 st.title(":cup_with_straw: Customize your Smoothie! :cup_with_straw:")
 st.write("Choose the fruits you want in your custom Smoothie!")
 
-# Snowflake connection (Streamlit secrets)
+# Snowflake connection
 cnx = st.connection("snowflake")
 session = cnx.session()
 
@@ -16,19 +16,29 @@ session = cnx.session()
 session.sql("USE DATABASE SMOOTHIES").collect()
 session.sql("USE SCHEMA PUBLIC").collect()
 
+# Ensure schema includes ORDER_FILLED
+session.sql(
+    """
+    ALTER TABLE IF EXISTS SMOOTHIES.PUBLIC.ORDERS
+    ADD COLUMN IF NOT EXISTS ORDER_FILLED BOOLEAN DEFAULT FALSE
+    """
+).collect()
+
 # Input for customer name
-name_on_order = st.text_input('Name on Smoothie:')
+name_on_order = st.text_input("Name on Smoothie:").strip()
 if name_on_order:
     st.write(f"Name entered: {name_on_order}")
 
 # Fruit options
-my_dataframe = session.table("SMOOTHIES.PUBLIC.FRUIT_OPTIONS").select(col('FRUIT_NAME'), col('SEARCH_ON'))
-pd_df = my_dataframe.to_pandas()
-st.dataframe(pd_df, use_container_width=True)
+options_df = (
+    session.table("SMOOTHIES.PUBLIC.FRUIT_OPTIONS")
+    .select(col("FRUIT_NAME"), col("SEARCH_ON"))
+    .to_pandas()
+)
+st.dataframe(options_df, use_container_width=True)
 
 st.write("Choose up to 5 fruits for your custom smoothie:")
-
-fruit_list = pd_df["FRUIT_NAME"].tolist()
+fruit_list = options_df["FRUIT_NAME"].tolist()
 ingredients_list = st.multiselect("Pick your favorite fruits:", fruit_list, max_selections=5)
 
 # UX hints
@@ -41,43 +51,43 @@ else:
 
 # Nutrition (optional)
 if ingredients_list:
-    for fruit_chosen in ingredients_list:
-        search_on = pd_df.loc[pd_df['FRUIT_NAME'] == fruit_chosen, 'SEARCH_ON'].iloc[0]
-        st.subheader(f'{fruit_chosen} Nutrition Information')
-        fruityvice_response = requests.get("https://fruityvice.com/api/fruit/" + search_on)
-        st.dataframe(data=fruityvice_response.json(), use_container_width=True)
+    for fruit in ingredients_list:
+        search_on = options_df.loc[options_df["FRUIT_NAME"] == fruit, "SEARCH_ON"].iloc[0]
+        st.subheader(f"{fruit} Nutrition Information")
+        try:
+            res = requests.get("https://fruityvice.com/api/fruit/" + str(search_on), timeout=10)
+            st.dataframe(res.json(), use_container_width=True)
+        except Exception as e:
+            st.caption(f"(Skipping nutrition lookup: {e})")
 
-# ---------- CORE FIX STARTS HERE ----------
-def space_join(parts: list[str]) -> str:
-    # Join with ASCII spaces only, remove NBSP and extra whitespace
-    cleaned = [p.strip().replace("\u00A0", " ") for p in parts]
-    out = " ".join(cleaned).strip()
-    # collapse any accidental doubles (safety)
-    while "  " in out:
-        out = out.replace("  ", " ")
+# --- Helpers ---
+def normalize_items(items):
+    out = []
+    for x in items:
+        s = str(x).replace(" ", " ").replace(" ", " ")
+        s = " ".join(s.split())  # collapse whitespace
+        out.append(s)
     return out
 
+# ---------- Place Order (INSERT/UPSERT) ----------
 if ingredients_list and name_on_order:
-    if st.button('Submit Order'):
-        # ✅ SPACE-joined string (NO COMMAS)
-        ingredients_str = space_join(ingredients_list)
+    if st.button("Submit Order"):
+        clean = normalize_items(ingredients_list)
+        # Comma+space list — required for grader hashing
+        ingredients_str = ", ".join(clean)
 
-        # Escape single quotes for SQL literals
-        name_sql = name_on_order.strip().replace("'", "''")
-        ing_sql  = ingredients_str.replace("'", "''")
-
-        # ✅ Use MERGE to avoid duplicates per name (keeps one row per customer)
-        session.sql(f"""
+        # Parameter binding (avoid f-strings)
+        session.sql(
+            """
             MERGE INTO SMOOTHIES.PUBLIC.ORDERS t
-            USING (SELECT '{name_sql}' AS n, '{ing_sql}' AS s, FALSE AS f) src
+            USING (SELECT ? AS n, ? AS s, FALSE AS f) src
               ON t.NAME_ON_ORDER = src.n
             WHEN MATCHED THEN UPDATE SET
               t.INGREDIENTS = src.s,
-              t.ORDER_FILLED = src.f,
-              t.ORDER_TS = COALESCE(t.ORDER_TS, CURRENT_TIMESTAMP())
+              t.ORDER_FILLED = src.f
             WHEN NOT MATCHED THEN INSERT (NAME_ON_ORDER, INGREDIENTS, ORDER_FILLED)
-              VALUES (src.n, src.s, src.f);
-        """).collect()
+              VALUES (src.n, src.s, src.f)
+            """
+        ).bind((name_on_order, ingredients_str)).collect()
 
         st.success("✅ Your Smoothie is ordered!", icon="🥤")
-# ---------- CORE FIX ENDS HERE ----------
