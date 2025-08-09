@@ -31,7 +31,7 @@ pd_df = my_dataframe.to_pandas()
 
 # Preview the pandas df
 st.dataframe(pd_df, use_container_width=True)
-st.stop()
+#st.stop()
 # Instruction for selecting fruits
 st.write("Choose up to 5 fruits for your custom smoothie:")
 
